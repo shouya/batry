@@ -1,32 +1,17 @@
-use std::{
-  cell::RefCell,
-  time::{Duration, Instant},
+use std::{cell::RefCell, time::Duration};
+
+use tokio::{
+  sync::watch::{self, Receiver, Sender},
+  time,
 };
-
-use tokio::sync::watch::{self, Receiver, Sender};
+use tokio_stream::StreamExt as TokioStream;
 use upower_dbus::{DeviceProxy, UPowerProxy};
-use zbus::export::futures_util::{stream, StreamExt};
+use zbus::export::futures_util::stream::{self, StreamExt};
 
-use crate::Result;
-
-#[derive(Debug, Clone)]
-pub struct State {
-  pub percentage: f64,
-  pub wattage: f64,
-  pub state: BatteryState,
-  pub updated_at: Instant,
-}
-
-#[derive(Debug, Clone)]
-pub enum BatteryState {
-  Discharging { time_to_empty: Duration },
-  Charging { time_to_full: Duration },
-  FullyCharged,
-  // AC connected but not charging into battery because it's already
-  // above some threshold, i.e. the battery is not expect to go empty.
-  NotCharging,
-  Unknown,
-}
+use crate::{
+  state::{BatteryState, State},
+  Result,
+};
 
 pub struct Monitor {
   device: DeviceProxy<'static>,
@@ -91,7 +76,7 @@ impl Monitor {
   pub async fn run(&self) -> Result<()> {
     macro_rules! event {
       ($name:ident) => {
-        self.device.$name().await.map(|_| stringify!($name)).boxed()
+        StreamExt::map(self.device.$name().await, |_| stringify!($name)).boxed()
       };
     }
 
@@ -102,9 +87,14 @@ impl Monitor {
       event!(receive_battery_level_changed),
     ];
 
-    let mut updates = stream::select_all(events);
-    while let Some(event_name) = updates.next().await {
-      dbg!(event_name);
+    // force update at least almost every 30 seconds
+    let min_poll_interval = time::interval(Duration::from_secs(30));
+    let mut updates = TokioStream::timeout_repeating(
+      stream::select_all(events),
+      min_poll_interval,
+    );
+
+    while StreamExt::next(&mut updates).await.is_some() {
       let state = get_state(&self.device).await?;
       self.sender.send(state).expect("receiver dropped")
     }
@@ -113,7 +103,9 @@ impl Monitor {
   }
 
   pub async fn changed_state(&self) -> Result<State> {
-    let _ = self.receiver.borrow_mut().changed().await;
+    let mut recv_mut = self.receiver.borrow_mut();
+    let _ = recv_mut.changed().await;
+    drop(recv_mut);
     Ok(self.receiver.borrow().borrow().clone())
   }
 }
@@ -134,7 +126,6 @@ async fn get_state(device: &DeviceProxy<'_>) -> Result<State> {
     .get_property::<i64>("TimeToEmpty")
     .await
     .map(|x| Duration::from_secs(x as u64))?;
-  let timestamp = Instant::now();
 
   let state = match device.state().await? {
     Charging => BatteryState::Charging { time_to_full },
@@ -148,6 +139,5 @@ async fn get_state(device: &DeviceProxy<'_>) -> Result<State> {
     percentage,
     wattage,
     state,
-    updated_at: timestamp,
   })
 }
