@@ -4,9 +4,6 @@ pub enum Error {
   Io(#[from] std::io::Error),
 
   #[error(transparent)]
-  Parse(#[from] envy::Error),
-
-  #[error(transparent)]
   DBus(#[from] zbus::Error),
 
   #[error(transparent)]
