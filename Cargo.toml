@@ -9,4 +9,6 @@ edition = "2021"
 envy = "0.4.2"
 serde = { version = "1.0.175", features = ["derive"] }
 thiserror = "1.0.44"
+tokio = { version = "1.29.1", features = ["macros", "time", "sync"] }
 upower_dbus = "0.3.2"
+zbus = { version = "3.14.1", features = ["tokio"], default-features = false }
