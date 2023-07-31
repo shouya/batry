@@ -1,4 +1,5 @@
-use std::time::Instant;
+use std::num::ParseIntError;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use tokio::select;
@@ -10,14 +11,18 @@ use crate::upower::Monitor;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct AppConfig {
-  /// Force polling interval in seconds. If not set, the monitor will
+  /// Minimal polling interval in seconds. If not set, the monitor will
   /// only poll when the power source or battery status changes.
-  #[arg(short = 'i', long)]
-  force_poll_interval: Option<u64>,
+  #[arg(
+    short = 'i', long,
+    default_value = "10",
+    value_parser = parse_duration
+  )]
+  min_poll_interval: Option<Duration>,
 
   /// Alert threshold in percent. If the battery percentage is below
   /// this threshold, the alert command will be executed.
-  #[arg(short = 'l', long, default_value_t = 10.0)]
+  #[arg(short = 't', long, default_value_t = 10.0)]
   alert_threshold: f64,
 
   /// Command to execute when the battery percentage is below the
@@ -28,8 +33,8 @@ struct AppConfig {
   /// Refire interval in seconds. The alert command will only be
   /// executed once every `alert_refire_interval` seconds as long as
   /// the battery percentage is below the alert threshold.
-  #[arg(short = 'r', long)]
-  alert_refire_interval: Option<u64>,
+  #[arg(short = 'r', long, value_parser = parse_duration)]
+  alert_refire_interval: Option<Duration>,
 }
 
 pub struct App {
@@ -40,8 +45,10 @@ pub struct App {
 
 impl App {
   pub async fn new_from_env() -> Result<Self> {
-    let monitor = Monitor::new().await?;
     let config = AppConfig::parse();
+
+    let min_poll_interval = min_poll_interval(&config);
+    let monitor = Monitor::new(min_poll_interval).await?;
     let last_alerted_at = RwLock::new(None);
 
     Ok(Self {
@@ -94,7 +101,7 @@ impl App {
     let should_alert = match last_alerted_at.as_ref() {
       Some(last_alerted_at) => {
         let elapsed = last_alerted_at.elapsed();
-        refire_interval.is_some_and(|i| elapsed.as_secs() >= i)
+        refire_interval.is_some_and(|i| elapsed >= i)
       }
       None => true,
     };
@@ -113,4 +120,20 @@ impl App {
 
     Ok(())
   }
+}
+
+// Because alert check only happens when the battery state changes,
+// the poll interval must be smaller than or equal to the alert refire
+// interval to allow for the alert to be correctly refired
+fn min_poll_interval(config: &AppConfig) -> Option<Duration> {
+  match (config.min_poll_interval, config.alert_refire_interval) {
+    (Some(min_pi), Some(refire_i)) => Some(min_pi.min(refire_i)),
+    (Some(min_pi), None) => Some(min_pi),
+    (None, Some(refire_i)) => Some(refire_i),
+    (None, None) => None,
+  }
+}
+
+fn parse_duration(arg: &str) -> Result<Duration, ParseIntError> {
+  Ok(Duration::from_secs(arg.parse()?))
 }

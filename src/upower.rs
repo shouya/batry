@@ -17,6 +17,7 @@ use crate::{
 };
 
 pub struct Monitor {
+  min_poll_interval: Option<Duration>,
   device: DeviceProxy<'static>,
   receiver: RwLock<Receiver<State>>,
   sender: Sender<State>,
@@ -58,7 +59,7 @@ Sample readout:
  */
 
 impl Monitor {
-  pub async fn new() -> Result<Monitor> {
+  pub async fn new(min_poll_interval: Option<Duration>) -> Result<Monitor> {
     let connection = zbus::Connection::system().await?;
     let device = UPowerProxy::new(&connection)
       .await?
@@ -70,6 +71,7 @@ impl Monitor {
     let receiver = RwLock::new(receiver);
 
     Ok(Self {
+      min_poll_interval,
       device,
       receiver,
       sender,
@@ -79,23 +81,25 @@ impl Monitor {
   pub async fn run(&self) -> Result<()> {
     macro_rules! event {
       ($name:ident) => {
-        StreamExt::map(self.device.$name().await, |_| stringify!($name)).boxed()
+        StreamExt::map(self.device.$name().await, |_| ()).boxed()
       };
     }
 
-    let events = [
+    let events = stream::select_all([
       event!(receive_energy_changed),
       event!(receive_percentage_changed),
       event!(receive_state_changed),
       event!(receive_battery_level_changed),
-    ];
+    ]);
 
-    // force update at least almost every 30 seconds
-    let min_poll_interval = time::interval(Duration::from_secs(30));
-    let mut updates = TokioStream::timeout_repeating(
-      stream::select_all(events),
-      min_poll_interval,
-    );
+    let mut updates = match self.min_poll_interval {
+      Some(interval) => {
+        let timer = time::interval(interval);
+        let stream = TokioStream::timeout_repeating(events, timer);
+        TokioStream::map(stream, |_| ()).boxed()
+      }
+      None => events.boxed(),
+    };
 
     while StreamExt::next(&mut updates).await.is_some() {
       let state = get_state(&self.device).await?;
