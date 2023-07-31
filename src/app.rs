@@ -1,4 +1,4 @@
-use std::num::ParseIntError;
+use std::num::{ParseFloatError, ParseIntError};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
@@ -22,7 +22,11 @@ struct AppConfig {
 
   /// Alert threshold in percent. If the battery percentage is below
   /// this threshold, the alert command will be executed.
-  #[arg(short = 't', long, default_value_t = 10.0)]
+  #[arg(
+    short = 't', long,
+    default_value = "10",
+    value_parser = parse_percentage
+  )]
   alert_threshold: f64,
 
   /// Command to execute when the battery percentage is below the
@@ -123,8 +127,12 @@ impl App {
 }
 
 // Because alert check only happens when the battery state changes,
-// the poll interval must be smaller than or equal to the alert refire
-// interval to allow for the alert to be correctly refired
+// The poll interval must be smaller than or equal to the alert refire
+// interval to allow for the alert to be correctly re-fired.
+//
+// TODO: drop the above requirement to avoid wasted queries. Or if
+// it's impossible, only make the battery state change faster when the
+// battery level is below the alert threshold.
 fn min_poll_interval(config: &AppConfig) -> Option<Duration> {
   match (config.min_poll_interval, config.alert_refire_interval) {
     (Some(min_pi), Some(refire_i)) => Some(min_pi.min(refire_i)),
@@ -136,4 +144,15 @@ fn min_poll_interval(config: &AppConfig) -> Option<Duration> {
 
 fn parse_duration(arg: &str) -> Result<Duration, ParseIntError> {
   Ok(Duration::from_secs(arg.parse()?))
+}
+
+fn parse_percentage(arg: &str) -> Result<f64, ParseFloatError> {
+  let arg = arg.trim_end_matches('%');
+  let parsed = arg.parse::<f64>()?;
+  if (0.0..=100.0).contains(&parsed) {
+    Ok(parsed)
+  } else {
+    // A bit hacky, but it works.
+    Err("BAD FLOAT".parse::<f64>().unwrap_err())
+  }
 }
