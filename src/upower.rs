@@ -101,6 +101,10 @@ impl Monitor {
       None => events.boxed(),
     };
 
+    // notify initial state
+    let state = get_state(&self.device).await?;
+    self.sender.send(state).expect("receiver dropped");
+
     while StreamExt::next(&mut updates).await.is_some() {
       let state = get_state(&self.device).await?;
       self.sender.send(state).expect("receiver dropped")
