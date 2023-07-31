@@ -9,12 +9,12 @@ pub struct State {
   #[serde(serialize_with = "whole_number")]
   pub wattage: f64,
   #[serde(flatten)]
-  pub state: BatteryState,
+  pub status: PowerStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum BatteryState {
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum PowerStatus {
   Discharging {
     #[serde(serialize_with = "human_duration")]
     time_to_empty: Duration,

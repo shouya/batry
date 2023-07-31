@@ -9,7 +9,7 @@ use upower_dbus::{DeviceProxy, UPowerProxy};
 use zbus::export::futures_util::stream::{self, StreamExt};
 
 use crate::{
-  state::{BatteryState, State},
+  state::{PowerStatus, State},
   Result,
 };
 
@@ -128,16 +128,16 @@ async fn get_state(device: &DeviceProxy<'_>) -> Result<State> {
     .map(|x| Duration::from_secs(x as u64))?;
 
   let state = match device.state().await? {
-    Charging => BatteryState::Charging { time_to_full },
-    Discharging => BatteryState::Discharging { time_to_empty },
-    FullyCharged => BatteryState::FullyCharged,
-    PendingCharge => BatteryState::NotCharging,
-    _ => BatteryState::Unknown,
+    Charging => PowerStatus::Charging { time_to_full },
+    Discharging => PowerStatus::Discharging { time_to_empty },
+    FullyCharged => PowerStatus::FullyCharged,
+    PendingCharge => PowerStatus::NotCharging,
+    _ => PowerStatus::Unknown,
   };
 
   Ok(State {
     percentage,
     wattage,
-    state,
+    status: state,
   })
 }
