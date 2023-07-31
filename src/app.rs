@@ -13,11 +13,7 @@ use crate::upower::Monitor;
 struct AppConfig {
   /// Minimal polling interval in seconds. If not set, the monitor will
   /// only poll when the power source or battery status changes.
-  #[arg(
-    short = 'i', long,
-    default_value = "10",
-    value_parser = parse_duration
-  )]
+  #[arg(short = 'i', long, value_parser = parse_duration)]
   min_poll_interval: Option<Duration>,
 
   /// Alert threshold in percent. If the battery percentage is below
