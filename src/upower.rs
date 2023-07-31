@@ -1,7 +1,10 @@
-use std::{cell::RefCell, time::Duration};
+use std::time::Duration;
 
 use tokio::{
-  sync::watch::{self, Receiver, Sender},
+  sync::{
+    watch::{self, Receiver, Sender},
+    RwLock,
+  },
   time,
 };
 use tokio_stream::StreamExt as TokioStream;
@@ -15,7 +18,7 @@ use crate::{
 
 pub struct Monitor {
   device: DeviceProxy<'static>,
-  receiver: RefCell<Receiver<State>>,
+  receiver: RwLock<Receiver<State>>,
   sender: Sender<State>,
 }
 
@@ -64,7 +67,7 @@ impl Monitor {
 
     let current_state = get_state(&device).await?;
     let (sender, receiver) = watch::channel(current_state);
-    let receiver = RefCell::new(receiver);
+    let receiver = RwLock::new(receiver);
 
     Ok(Self {
       device,
@@ -103,10 +106,10 @@ impl Monitor {
   }
 
   pub async fn changed_state(&self) -> Result<State> {
-    let mut recv_mut = self.receiver.borrow_mut();
+    let mut recv_mut = self.receiver.write().await;
     let _ = recv_mut.changed().await;
     drop(recv_mut);
-    Ok(self.receiver.borrow().borrow().clone())
+    Ok(self.receiver.read().await.borrow().clone())
   }
 }
 
